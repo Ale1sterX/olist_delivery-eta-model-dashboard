@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
-import joblib
-import os
-from sklearn.base import BaseEstimator, TransformerMixin
-import pandas as pd
 import numpy as np
+import joblib
+
+# ===============================
+# Custom Transformer (REQUIRED)
+# ===============================
+from sklearn.base import BaseEstimator, TransformerMixin
 
 class FrequencyEncoder(BaseEstimator, TransformerMixin):
     def __init__(self):
@@ -23,16 +25,16 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         return X_df
 
     def _to_dataframe(self, X):
-        # Handle Series or ndarray safely
         if isinstance(X, pd.Series):
             return X.to_frame()
         if isinstance(X, np.ndarray):
             return pd.DataFrame(X)
         return X
 
-# =====================
-# Page config
-# =====================
+
+# ===============================
+# App Config
+# ===============================
 st.set_page_config(
     page_title="SLA-aware Delivery ETA Prediction System",
     layout="wide"
@@ -40,25 +42,21 @@ st.set_page_config(
 
 st.title("📦 SLA-aware Delivery ETA Prediction System")
 st.caption(
-    "Final Model: XGBoost Quantile Regression (α = 0.94) · "
-    "Output represents an SLA-safe delivery estimate (p94)"
+    "Final Model: XGBoost Quantile Regression (p94) — output merepresentasikan estimasi ETA yang SLA-safe"
 )
 
-# =====================
-# Load model
-# =====================
+# ===============================
+# Load Model
+# ===============================
 @st.cache_resource
 def load_model():
-    if not os.path.exists("xgb_quantile_p94.pkl"):
-        st.error("Model file xgb_quantile_p94.pkl tidak ditemukan di repository.")
-        st.stop()
     return joblib.load("xgb_quantile_p94.pkl")
 
 model = load_model()
 
-# =====================
-# EXACT feature schema (from feature_names_in_)
-# =====================
+# ===============================
+# Feature Contract (EXACT)
+# ===============================
 MODEL_FEATURES = [
     "customer_state",
     "order_item_id",
@@ -70,7 +68,7 @@ MODEL_FEATURES = [
     "product_category_name_english",
     "is_weekend",
     "same_state",
-    "distance_km"
+    "distance_km",
 ]
 
 FEATURE_DTYPES = {
@@ -84,53 +82,40 @@ FEATURE_DTYPES = {
     "product_category_name_english": "object",
     "is_weekend": "int64",
     "same_state": "int64",
-    "distance_km": "float64"
+    "distance_km": "float64",
 }
 
+# Default values MUST exist in training data
 DEFAULT_FEATURE_VALUES = {
-    "customer_state": "SP",                     # most frequent
+    "customer_state": "SP",
     "product_category_name_english": "bed_bath_table",
     "order_item_id": 1,
     "is_weekend": 0,
     "same_state": 1,
     "distance_km": 300.0,
-    "product_length_cm": 30.0
+    "product_length_cm": 30.0,
 }
 
-
-# =====================
-# Prediction section
-# =====================
+# ===============================
+# UI — User Inputs
+# ===============================
 st.subheader("🔮 SLA-safe Delivery Time Prediction (p94)")
 
-st.markdown(
-    """
-    Masukkan karakteristik pesanan untuk memperoleh estimasi waktu pengiriman
-    yang **bersifat SLA-safe**, yaitu estimasi waktu sehingga sekitar **94% pesanan
-    dengan karakteristik serupa diperkirakan selesai pada atau sebelum waktu ini**.
-    """
-)
+col1, col2 = st.columns(2)
 
-with st.form("prediction_form"):
-    col1, col2 = st.columns(2)
+with col1:
+    price = st.slider("Product Price", 0.0, 5000.0, 300.0)
+    product_weight_g = st.slider("Product Weight (g)", 0.0, 30000.0, 7000.0)
 
-    with col1:
-        distance_km = st.slider("Distance (km)", 0, 2000, 300)
-        price = st.slider("Product Price", 0.0, 500.0, 100.0)
-        product_weight_g = st.slider("Product Weight (g)", 0, 10000, 1000)
+with col2:
+    product_height_cm = st.slider("Product Height (cm)", 0.0, 200.0, 50.0)
+    product_width_cm = st.slider("Product Width (cm)", 0.0, 200.0, 20.0)
 
-    with col2:
-        product_length_cm = st.slider("Product Length (cm)", 0, 100, 30)
-        product_height_cm = st.slider("Product Height (cm)", 0, 100, 20)
-        product_width_cm = st.slider("Product Width (cm)", 0, 100, 20)
-
-    submitted = st.form_submit_button("Predict SLA-safe ETA")
-
-# =====================
-# Inference
-# =====================
-if submitted:
-    # Default-safe input template
+# ===============================
+# Prediction
+# ===============================
+if st.button("Predict SLA-safe ETA"):
+    # user-provided inputs
     input_dict = {
         "price": price,
         "product_weight_g": product_weight_g,
@@ -138,36 +123,23 @@ if submitted:
         "product_width_cm": product_width_cm,
     }
 
-    # fill missing features with defaults
+    # fill missing features with dataset defaults
     for col in MODEL_FEATURES:
         if col not in input_dict:
             input_dict[col] = DEFAULT_FEATURE_VALUES[col]
 
-    # Ensure all required features exist
+    # build dataframe in correct order
     input_df = pd.DataFrame([input_dict])[MODEL_FEATURES]
 
-    # Force correct dtypes (IMPORTANT)
+    # enforce dtypes (CRITICAL)
     for col, dtype in FEATURE_DTYPES.items():
         input_df[col] = input_df[col].astype(dtype)
 
+    # predict
     p94_eta = model.predict(input_df)[0]
 
-    st.success(
-        f"📦 SLA-safe delivery estimate (p94): **{p94_eta:.1f} days**"
-    )
-
+    st.success(f"📦 Predicted SLA-safe ETA (p94): **{p94_eta:.1f} days**")
     st.caption(
-        "Interpretation: sekitar 94% pesanan historis dengan karakteristik serupa "
-        "diperkirakan akan terkirim pada atau sebelum waktu ini."
+        "Artinya: ~94% pesanan dengan karakteristik serupa diperkirakan akan tiba "
+        "pada atau sebelum estimasi waktu ini."
     )
-
-    st.caption(
-        "Catatan: fitur yang tidak diisi pengguna diasumsikan bernilai default "
-        "sesuai konfigurasi sistem."
-    )
-
-# =====================
-# Footer
-# =====================
-st.markdown("---")
-st.caption("Delivery ETA Prediction System · Quantile Regression p94 · Streamlit")
