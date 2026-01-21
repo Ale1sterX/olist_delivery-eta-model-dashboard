@@ -87,6 +87,17 @@ FEATURE_DTYPES = {
     "distance_km": "float64"
 }
 
+DEFAULT_FEATURE_VALUES = {
+    "customer_state": "SP",                     # most frequent
+    "product_category_name_english": "bed_bath_table",
+    "order_item_id": 1,
+    "is_weekend": 0,
+    "same_state": 1,
+    "distance_km": 300.0,
+    "product_length_cm": 30.0
+}
+
+
 # =====================
 # Prediction section
 # =====================
@@ -121,18 +132,16 @@ with st.form("prediction_form"):
 if submitted:
     # Default-safe input template
     input_dict = {
-        "customer_state": "SP",                     # default state
-        "order_item_id": 1,                         # dummy identifier
         "price": price,
         "product_weight_g": product_weight_g,
-        "product_length_cm": product_length_cm,
         "product_height_cm": product_height_cm,
         "product_width_cm": product_width_cm,
-        "product_category_name_english": "others",  # safe default
-        "is_weekend": 0,                            # assume weekday
-        "same_state": 1,                            # assume same state
-        "distance_km": distance_km
     }
+
+    # fill missing features with defaults
+    for col in MODEL_FEATURES:
+        if col not in input_dict:
+            input_dict[col] = DEFAULT_FEATURE_VALUES[col]
 
     # Ensure all required features exist
     input_df = pd.DataFrame([input_dict])[MODEL_FEATURES]
