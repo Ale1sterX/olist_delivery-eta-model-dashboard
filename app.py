@@ -2,6 +2,23 @@ import streamlit as st
 import pandas as pd
 import joblib
 import os
+from sklearn.base import BaseEstimator, TransformerMixin
+import pandas as pd
+
+class FrequencyEncoder(BaseEstimator, TransformerMixin):
+    def __init__(self):
+        self.freq_map_ = {}
+
+    def fit(self, X, y=None):
+        for col in X.columns:
+            self.freq_map_[col] = X[col].value_counts(normalize=True)
+        return self
+
+    def transform(self, X):
+        X_out = X.copy()
+        for col in X.columns:
+            X_out[col] = X[col].map(self.freq_map_[col]).fillna(0)
+        return X_out
 
 # =====================
 # Page config
