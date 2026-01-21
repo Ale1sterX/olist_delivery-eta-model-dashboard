@@ -1,49 +1,34 @@
-import joblib
 import streamlit as st
-from sklearn.base import BaseEstimator, TransformerMixin
 import pandas as pd
-
-class FrequencyEncoder(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        self.freq_map_ = {}
-
-    def fit(self, X, y=None):
-        for col in X.columns:
-            self.freq_map_[col] = X[col].value_counts(normalize=True)
-        return self
-
-    def transform(self, X):
-        X_transformed = X.copy()
-        for col in X.columns:
-            X_transformed[col] = X[col].map(self.freq_map_[col]).fillna(0)
-        return X_transformed
-
-@st.cache_resource
-def load_model():
-    return joblib.load("xgb_quantile_p94.pkl")
-
-model = load_model()
+import joblib
 
 # =====================
 # Page config
 # =====================
 st.set_page_config(
-    page_title="Delivery ETA Model Dashboard",
+    page_title="SLA-aware Delivery ETA Prediction System",
     layout="wide"
 )
 
-st.title("📦 Delivery ETA Model Dashboard")
-st.caption("Baseline vs ML Model • Tail Risk (p94) • Cost Implication")
-
-# =====================
-# Sidebar
-# =====================
-st.sidebar.header("⚙️ Configuration")
-
-view_mode = st.sidebar.radio(
-    "Pilih sistem",
-    ["Baseline (Existing)", "ML Model (XGBoost Asymmetric)"]
+st.title("📦 SLA-aware Delivery ETA Prediction System")
+st.caption(
+    "Final Model: XGBoost Quantile Regression (α = 0.94) · "
+    "Output represents an SLA-safe delivery estimate"
 )
+
+# =====================
+# Load model
+# =====================
+@st.cache_resource
+def load_model():
+    return joblib.load("xgb_quantile.pkl")
+
+model = load_model()
+
+# =====================
+# Sidebar: system settings
+# =====================
+st.sidebar.header("⚙️ System Settings")
 
 cost_per_failed_delivery = st.sidebar.slider(
     "Biaya per late / failed delivery (USD)",
@@ -54,98 +39,143 @@ cost_per_failed_delivery = st.sidebar.slider(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Dataset: Test Set")
+st.sidebar.caption("Model output = p94 (upper bound / SLA-safe)")
 
 # =====================
-# Metrics from notebook
+# Section 1: Prediction system
 # =====================
-mae_baseline = 12.8
-mae_model = 12.2
+st.subheader("🔮 SLA-safe Delivery Time Prediction (p94)")
+
+st.markdown(
+    """
+    Masukkan karakteristik pesanan untuk memperoleh estimasi waktu pengiriman
+    **yang bersifat SLA-safe**, yaitu estimasi waktu sehingga sekitar **94% pesanan
+    dengan karakteristik serupa diperkirakan selesai pada atau sebelum waktu ini**.
+    """
+)
+
+with st.form("prediction_form"):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        distance_km = st.slider("Distance (km)", 0, 2000, 300)
+        freight_value = st.slider("Freight Value", 0.0, 200.0, 40.0)
+
+    with col2:
+        seller_avg_delay = st.slider("Seller Average Delay (days)", 0.0, 10.0, 2.0)
+        customer_state_encoded = st.number_input(
+            "Customer State (encoded)",
+            min_value=0,
+            max_value=30,
+            value=5
+        )
+
+    submitted = st.form_submit_button("Predict SLA-safe ETA")
+
+if submitted:
+    input_df = pd.DataFrame({
+        "distance_km": [distance_km],
+        "freight_value": [freight_value],
+        "seller_avg_delay": [seller_avg_delay],
+        "customer_state_encoded": [customer_state_encoded]
+    })
+
+    p94_eta = model.predict(input_df)[0]
+
+    st.success(
+        f"📦 SLA-safe delivery estimate (p94): **{p94_eta:.1f} days**"
+    )
+
+    st.caption(
+        "Interpretation: sekitar 94% pesanan historis dengan karakteristik serupa "
+        "diperkirakan akan terkirim pada atau sebelum waktu ini."
+    )
+
+# =====================
+# Section 2: Historical benchmark
+# =====================
+st.subheader("📊 Historical Benchmark (Contextual Comparison)")
 
 late_rate_baseline = 0.067
 late_rate_model = 0.066
 
-p94_model = 24.507785
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric(
+        "Late Delivery Rate — Existing System",
+        f"{late_rate_baseline*100:.2f}%"
+    )
+
+with col2:
+    st.metric(
+        "Late Delivery Rate — Quantile p94 Model",
+        f"{late_rate_model*100:.2f}%",
+        delta=f"{(late_rate_baseline - late_rate_model)*100:.2f}%"
+    )
+
+st.caption(
+    "Benchmark ini dihitung dari data historis dan ditampilkan sebagai konteks. "
+    "Nilai ini **tidak merepresentasikan prediksi individual** untuk input di atas."
+)
 
 # =====================
-# Select metrics based on toggle
+# Section 3: Cost implication
 # =====================
-if view_mode == "Baseline (Existing)":
-    mae = mae_baseline
-    late_rate = late_rate_baseline
-    label = "Baseline (Existing System)"
-else:
-    mae = mae_model
-    late_rate = late_rate_model
-    label = "ML Model (XGBoost Asymmetric)"
+st.subheader("💰 Cost Implication (Illustrative Simulation)")
 
-# =====================
-# Performance section
-# =====================
-st.subheader(f"📊 Performance Overview — {label}")
+n_orders = st.slider(
+    "Jumlah order (simulasi periode tertentu)",
+    min_value=50,
+    max_value=500,
+    value=200,
+    step=10
+)
+
+late_orders_baseline = int(n_orders * late_rate_baseline)
+late_orders_model = int(n_orders * late_rate_model)
+
+cost_baseline = late_orders_baseline * cost_per_failed_delivery
+cost_model = late_orders_model * cost_per_failed_delivery
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.metric("MAE (days)", f"{mae:.2f}")
+    st.metric("Late Orders (Baseline)", late_orders_baseline)
 
 with col2:
-    st.metric("Late Delivery Rate", f"{late_rate*100:.2f}%")
+    st.metric("Late Orders (Model)", late_orders_model)
 
 with col3:
-    if view_mode == "ML Model (XGBoost Asymmetric)":
-        st.metric("p94 Absolute Error (days)", f"{p94_model:.2f}")
-    else:
-        st.metric("p94 Absolute Error (days)", "N/A")
+    st.metric(
+        "Estimated Cost Reduction",
+        f"USD {cost_baseline - cost_model:,.2f}"
+    )
+
+st.caption(
+    "Biaya dihitung menggunakan estimasi biaya langsung per keterlambatan "
+    "(mis. redelivery, handling, dan customer service)."
+)
 
 # =====================
-# Cost simulation
+# Section 4: System interpretation
 # =====================
-st.subheader("💰 Cost Simulation (Direct Operational Cost)")
-
-n_orders = 200
-late_orders = int(n_orders * late_rate)
-total_cost = late_orders * cost_per_failed_delivery
+st.subheader("🧠 System Interpretation")
 
 st.markdown(
-    f"""
-    **Asumsi simulasi:**
-    - Jumlah order: **{n_orders}**
-    - Late delivery rate: **{late_rate*100:.2f}%**
-    - Jumlah order terlambat: **{late_orders}**
-    - Biaya per late delivery: **USD {cost_per_failed_delivery:.2f}**
+    """
+    - Sistem ini menggunakan **Quantile Regression (α = 0.94)** untuk menghasilkan
+      estimasi waktu pengiriman yang berorientasi pada SLA, bukan estimasi rata-rata.
+    - Pendekatan ini dirancang untuk **mengendalikan risiko keterlambatan**, terutama
+      pada kasus ekstrem.
+    - Perbandingan dengan sistem existing dilakukan pada level historis untuk menjaga
+      interpretasi tetap valid dan tidak menyesatkan pada level individual.
     """
 )
-
-st.metric(
-    "Estimated Direct Cost of Late Deliveries",
-    f"USD {total_cost:,.2f}"
-)
-
-# =====================
-# Interpretation
-# =====================
-st.subheader("🧠 Interpretation")
-
-if view_mode == "Baseline (Existing)":
-    st.markdown(
-        """
-        - Sistem existing menggunakan estimasi statis tanpa mekanisme adaptif.
-        - MAE relatif lebih tinggi dan estimasi cenderung konservatif.
-        - Tidak tersedia evaluasi tail risk eksplisit (p94) pada level observasi.
-        """
-    )
-else:
-    st.markdown(
-        f"""
-        - Model berhasil **menurunkan MAE** dibandingkan baseline.
-        - **Late delivery rate tetap stabil**, menunjukkan tidak ada degradasi SLA.
-        - Nilai **p94 ≈ {p94_model:.1f} hari** menunjukkan **tail risk tetap terkendali**.
-        - Penggunaan asymmetric loss membantu mengelola risiko pada kasus ekstrem.
-        """
-    )
 
 # =====================
 # Footer
 # =====================
-st.caption("Delivery ETA ML Project • Streamlit Dashboard")
+st.caption(
+    "Delivery ETA Prediction System · Quantile Regression p94 · Streamlit"
+)
