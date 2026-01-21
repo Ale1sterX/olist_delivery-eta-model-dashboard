@@ -21,7 +21,7 @@ st.caption(
 # =====================
 @st.cache_resource
 def load_model():
-    return joblib.load("xgb_quantile.pkl")
+    return joblib.load("xgb_quantile_p94.pkl")
 
 model = load_model()
 
