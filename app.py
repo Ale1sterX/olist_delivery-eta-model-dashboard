@@ -63,6 +63,20 @@ MODEL_FEATURES = [
     "distance_km"
 ]
 
+FEATURE_DTYPES = {
+    "customer_state": "object",
+    "order_item_id": "int64",
+    "price": "float64",
+    "product_weight_g": "float64",
+    "product_length_cm": "float64",
+    "product_height_cm": "float64",
+    "product_width_cm": "float64",
+    "product_category_name_english": "object",
+    "is_weekend": "int64",
+    "same_state": "int64",
+    "distance_km": "float64"
+}
+
 # =====================
 # Prediction section
 # =====================
@@ -112,6 +126,10 @@ if submitted:
 
     # Ensure all required features exist
     input_df = pd.DataFrame([input_dict])[MODEL_FEATURES]
+
+    # Force correct dtypes (IMPORTANT)
+    for col, dtype in FEATURE_DTYPES.items():
+        input_df[col] = input_df[col].astype(dtype)
 
     p94_eta = model.predict(input_df)[0]
 
