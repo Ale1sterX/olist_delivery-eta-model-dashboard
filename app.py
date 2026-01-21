@@ -4,21 +4,31 @@ import joblib
 import os
 from sklearn.base import BaseEstimator, TransformerMixin
 import pandas as pd
+import numpy as np
 
 class FrequencyEncoder(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.freq_map_ = {}
 
     def fit(self, X, y=None):
-        for col in X.columns:
-            self.freq_map_[col] = X[col].value_counts(normalize=True)
+        X_df = self._to_dataframe(X)
+        for col in X_df.columns:
+            self.freq_map_[col] = X_df[col].value_counts(normalize=True)
         return self
 
     def transform(self, X):
-        X_out = X.copy()
-        for col in X.columns:
-            X_out[col] = X[col].map(self.freq_map_[col]).fillna(0)
-        return X_out
+        X_df = self._to_dataframe(X).copy()
+        for col in X_df.columns:
+            X_df[col] = X_df[col].map(self.freq_map_[col]).fillna(0)
+        return X_df
+
+    def _to_dataframe(self, X):
+        # Handle Series or ndarray safely
+        if isinstance(X, pd.Series):
+            return X.to_frame()
+        if isinstance(X, np.ndarray):
+            return pd.DataFrame(X)
+        return X
 
 # =====================
 # Page config
