@@ -115,7 +115,7 @@ if st.button("Predict ETA"):
         pred = model.predict(input_df)[0]
 
         st.success(f"Estimated Delivery Time: **{pred:.1f} days**")
-=======
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -232,4 +232,3 @@ if st.button("Predict ETA"):
         pred = model.predict(input_df)[0]
 
         st.success(f"Estimated Delivery Time: **{pred:.1f} days**")
->>>>>>> 7f61398b9a57ff97d62ec64674fdcbc11aa231de
