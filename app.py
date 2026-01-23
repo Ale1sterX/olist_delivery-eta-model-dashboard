@@ -1,115 +1,116 @@
 import streamlit as st
 import pandas as pd
-import joblib
+import numpy as np
+import pickle
+from math import radians, sin, cos, sqrt, asin
+from encoders import FrequencyEncoder 
 
-from sklearn.base import BaseEstimator, TransformerMixin
+# Load model & data
+with open("models/xgb_p94_model.pkl", "rb") as f:
+    model = pickle.load(f)
 
-# =====================================================
-# Custom Transformer (WAJIB untuk unpickle model)
-# =====================================================
-class FrequencyEncoder(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        self.freq_maps_ = {}
-
-    def fit(self, X, y=None):
-        X = pd.DataFrame(X)
-        for col in X.columns:
-            self.freq_maps_[col] = X[col].value_counts(normalize=True)
-        return self
-
-    def transform(self, X):
-        X = pd.DataFrame(X).copy()
-        for col in X.columns:
-            freq_map = self.freq_maps_.get(col, {})
-            X[col] = X[col].map(freq_map).fillna(0)
-        return X
-
-
-# =====================================================
-# Load model (Pipeline)
-# =====================================================
-@st.cache_resource
-def load_model():
-    return joblib.load("xgb_quantile_p94.pkl")
-
-model = load_model()
-
-
-# =====================================================
-# Streamlit Page Config
-# =====================================================
-st.set_page_config(
-    page_title="SLA-aware Delivery ETA Prediction",
-    layout="wide"
+zip_df = pd.read_csv(
+    "olist_geolocation_dataset.csv",
+    dtype={"geolocation_zip_code_prefix": str}
 )
 
-st.title("📦 SLA-aware Delivery ETA Prediction System")
-st.caption(
-    "Final Model: XGBoost Quantile Regression (p94) — "
-    "Output merepresentasikan estimasi ETA yang SLA-safe"
+zip_df = (
+    zip_df
+    .groupby("geolocation_zip_code_prefix", as_index=False)
+    .agg({
+        "geolocation_lat": "mean",
+        "geolocation_lng": "mean",
+        "geolocation_state": "first"
+    })
+    .set_index("geolocation_zip_code_prefix")
 )
 
-st.markdown("---")
+state_freq_df = pd.read_csv("state_frequency.csv")
 
-# =====================================================
-# Input Form (HARUS SESUAI feature_names_in_)
-# =====================================================
-with st.form("prediction_form"):
-    col1, col2 = st.columns(2)
 
-    with col1:
-        price = st.number_input("Product Price", value=300.0)
-        product_weight_g = st.number_input("Product Weight (g)", value=7000.0)
-        product_length_cm = st.number_input("Product Length (cm)", value=30.0)
-        product_height_cm = st.number_input("Product Height (cm)", value=50.0)
-        product_width_cm = st.number_input("Product Width (cm)", value=20.0)
+state_freq_map = dict(
+    zip(state_freq_df.customer_state, state_freq_df.freq_customer_state)
+)
 
-    with col2:
-        customer_state = st.number_input("Customer State (encoded)", value=10)
-        order_item_id = st.number_input("Order Item ID", value=1)
-        product_category_name_english = st.number_input(
-            "Product Category Frequency",
-            value=0.05,
-            min_value=0.0,
-            max_value=1.0
+# Distance function
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    return 2 * R * asin(sqrt(a))
+
+category_list = (
+    pd.read_csv("olist_combined_dataset.csv")
+    ["product_category_name_english"]
+    .dropna()
+    .unique()
+)
+
+# UI
+st.title("Smart ETA Prediction")
+st.caption("Risk-aware delivery estimation")
+
+st.subheader("Customer & Seller")
+
+customer_zip = st.text_input("Customer ZIP Code")
+seller_zip = st.text_input("Seller ZIP Code")
+customer_state = st.selectbox(
+    "Customer State",
+    state_freq_df.customer_state
+)
+
+st.subheader("Product Info")
+product_category = st.selectbox(
+    "Product Category",
+    sorted(category_list)
+)
+price = st.number_input("Price (R$)", min_value=0.0)
+product_weight_g = st.number_input("Product Weight (g)", min_value=0.0)
+product_length_cm = st.number_input("Length (cm)", min_value=0.0)
+product_height_cm = st.number_input("Height (cm)", min_value=0.0)
+product_width_cm = st.number_input("Width (cm)", min_value=0.0)
+order_item_id = st.number_input("Product Quantity", min_value=1)
+
+is_weekend = st.checkbox("Order on Weekend")
+
+# Prediction
+if st.button("Predict ETA"):
+
+    if customer_zip not in zip_df.index or seller_zip not in zip_df.index:
+        st.error("ZIP code not found")
+    else:
+        cust = zip_df.loc[customer_zip]
+        sell = zip_df.loc[seller_zip]
+
+        distance_km = haversine(
+            cust["geolocation_lat"],
+            cust["geolocation_lng"],
+            sell["geolocation_lat"],
+            sell["geolocation_lng"]
         )
-        is_weekend = st.selectbox("Is Weekend?", [0, 1])
-        same_state = st.selectbox("Same State (Seller & Customer)", [0, 1])
-        distance_km = st.number_input("Distance (km)", value=1000.0)
 
-    submit = st.form_submit_button("🚀 Predict SLA-safe ETA")
-
-
-# =====================================================
-# Prediction Logic
-# =====================================================
-if submit:
-    input_df = pd.DataFrame([{
-        "customer_state": customer_state,
-        "order_item_id": order_item_id,
-        "price": price,
-        "product_weight_g": product_weight_g,
-        "product_length_cm": product_length_cm,
-        "product_height_cm": product_height_cm,
-        "product_width_cm": product_width_cm,
-        "product_category_name_english": product_category_name_english,
-        "is_weekend": is_weekend,
-        "same_state": same_state,
-        "distance_km": distance_km,
-    }])
-
-    try:
-        eta_p94 = model.predict(input_df)[0]
-
-        st.success(
-            f"📦 **Predicted SLA-safe ETA (p94): {eta_p94:.2f} days**"
+        same_state = int(
+            cust["geolocation_state"] == sell["geolocation_state"]
         )
 
-        st.caption(
-            "Interpretasi: sekitar 94% pesanan dengan karakteristik serupa "
-            "diperkirakan akan selesai **pada atau sebelum** waktu ini."
-        )
+        input_df = pd.DataFrame([{
+            "customer_state": customer_state,
+            "product_category_name_english": product_category,
+            "order_item_id": order_item_id,
+            "price": price,
+            "product_weight_g": product_weight_g,
+            "product_length_cm": product_length_cm,
+            "product_height_cm": product_height_cm,
+            "product_width_cm": product_width_cm,
+            "is_weekend": int(is_weekend),
+            "same_state": same_state,
+            "distance_km": distance_km,
+        }])
 
-    except Exception as e:
-        st.error("Terjadi error saat melakukan prediksi.")
-        st.exception(e)
+        pred = model.predict(input_df)[0]
+
+        st.success(f"Estimated Delivery Time: **{pred:.1f} days**")
